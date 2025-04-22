@@ -1,4 +1,9 @@
 #!/bin/bash
+# setup_nginx_certbot.sh - A script to set up Nginx and Certbot with SSL certificate generation
+# Created by februu @github.com/februu
+
+# More information about the script can be found at:
+# https://github.com/februu/scripts 
 
 # Color variables
 RED='\033[0;31m'
@@ -8,8 +13,7 @@ CYAN='\033[1;36m'
 MAGENTA='\033[1;35m'
 RESET='\033[0m'
 
-
-
+# Display important information
 echo -e "\nBefore running this script, please ensure you have the following:"
 echo -e "1. A domain (or domains) pointing to your server's IP address."
 echo -e "2. Docker and Docker Compose installed on your server."
@@ -35,6 +39,7 @@ if ! command -v docker &> /dev/null; then
     exit 1
 fi
 
+# Get user email for Let's Encrypt
 EMAIL=""
 while [[ -z "$EMAIL" ]]; do
     read -p "Enter your email address for Let's Encrypt certificate: " EMAIL
@@ -43,7 +48,6 @@ while [[ -z "$EMAIL" ]]; do
         EMAIL=""
     fi
 done
-
 echo -e "\n${GREEN}[INFO] Email address set to: ${EMAIL}${RESET}"
 echo -e "${GREEN}[INFO] All prerequisites are met. Proceeding with the setup...${RESET}"
 
@@ -61,16 +65,12 @@ for domain in "$@"; do
     DOMAINS="$DOMAINS -d $domain"
 done
 
-# Populate the Nginx files
+# Populate Nginx config files
 echo -e "${GREEN}[INFO] Copying Nginx configuration files... ${RESET}"
 docker run --rm -v "${CURRENT_DIR}/nginx/config:/tmp" nginx:stable-alpine sh -c "cp -r /etc/nginx/* /tmp"
-
 rm -rf "${CURRENT_DIR}/nginx/config/modules"
-
 mv "${CURRENT_DIR}/nginx/config/conf.d/default.conf" "${CURRENT_DIR}/nginx/config/conf.d/default.conf.disabled"
-
 mkdir -p "${CURRENT_DIR}/nginx/config/snippets"
-
 cat <<EOF > "${CURRENT_DIR}/nginx/config/snippets/acme.conf"
 location ^~ /.well-known/acme-challenge/ {
     root /usr/share/nginx/letsencrypt;
@@ -78,7 +78,6 @@ location ^~ /.well-known/acme-challenge/ {
     try_files \$uri \$uri/ =404;
 }
 EOF
-
 cat <<EOF > "${CURRENT_DIR}/nginx/config/conf.d/init.conf"
 server {
     listen 80;
@@ -92,9 +91,8 @@ server {
 }
 EOF
 
-echo -e "${GREEN}[INFO] Creating Docker Compose file... ${RESET}"
-
 # Create a Docker Compose file
+echo -e "${GREEN}[INFO] Creating Docker Compose file... ${RESET}"
 cat <<EOF > "${CURRENT_DIR}/nginx/docker-compose.yml"
 services:
     nginx:
@@ -120,15 +118,13 @@ services:
             - nginx
 EOF
 echo -e "${GREEN}[INFO] Docker Compose file created successfully.${RESET}"
-echo -e "${GREEN}[INFO] Starting Nginx and Certbot containers...${RESET}"
 
+# Start Nginx and Certbot containers
+echo -e "${GREEN}[INFO] Starting Nginx and Certbot containers...${RESET}"
 docker compose -f "${CURRENT_DIR}/nginx/docker-compose.yml" down > /dev/null 2>&1
 docker compose -f "${CURRENT_DIR}/nginx/docker-compose.yml" up -d nginx
-
 sleep 5
-
 echo -e "${GREEN}[INFO] Obtaining SSL certificates...${RESET}"
-
 docker compose -f "${CURRENT_DIR}/nginx/docker-compose.yml" up certbot
 
 if [ $? -ne 0 ]; then
@@ -136,11 +132,10 @@ if [ $? -ne 0 ]; then
     echo "${RED}[ERROR]: Failed to generate certificates."   
     exit 1
 fi 
-
 docker compose -f "${CURRENT_DIR}/nginx/docker-compose.yml" down
 
+# Remove the initial configuration and replace it with the final one
 rm -f "${CURRENT_DIR}/nginx/config/conf.d/init.conf"
-
 for domain in "$@"; do
 cat <<EOF > "${CURRENT_DIR}/nginx/config/conf.d/${domain}.conf"
 server {
@@ -171,13 +166,13 @@ server {
 EOF
 done
 
+# Start Nginx with the final configuration
 docker compose -f "${CURRENT_DIR}/nginx/docker-compose.yml" up -d
-
 echo -e "\n${GREEN}[INFO] Nginx and Certbot setup completed successfully!${RESET}"
 
+# Display instructions for setting up a cron job
 echo -e "\n${YELLOW}Remember to set up a cron job to renew the certificates automatically!${RESET}"
 echo -e "${YELLOW}Make sure the crontab user has sufficient permission for Docker.${RESET}"
 echo -e "${YELLOW} ou can add the following line to your crontab (crontab -e):${RESET}"
 echo -e "${YELLOW}0 3 * * 1 /usr/bin/docker compose -f ${CURRENT_DIR}/nginx/docker-compose.yml up certbot ${RESET}"
-
 echo -e "\n${GREEN}[INFO] Script successfully completed!${RESET}"
